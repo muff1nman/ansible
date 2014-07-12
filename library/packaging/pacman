@@ -82,8 +82,11 @@ import shlex
 import os
 import re
 import sys
+from collections import namedtuple
 
 PACMAN_PATH = "/usr/bin/pacman"
+
+ModuleStatus = namedtuple('ModuleStatus', 'changed msg failed')
 
 def query_package(module, name, state="present"):
     # pacman -Q returns 0 if the package is installed,
@@ -98,14 +101,17 @@ def query_package(module, name, state="present"):
         return False
 
 
-def update_package_db(module):
+def update_package_db(module, check_only):
+    if check_only:
+        return ModuleStatus(changed=True, failed=False, msg='The package master lists will be updated')
+
     cmd = "pacman -Syy"
     rc, stdout, stderr = module.run_command(cmd, check_rc=False)
 
     if rc == 0:
-        return True
+        return ModuleStatus(changed=True, failed=False, msg='The package master lists were updated')
     else:
-        module.fail_json(msg="could not update package db")
+        return ModuleStatus(failed=True, changed=False, msg="could not update package db")
 
 
 def remove_packages(module, packages):
@@ -125,15 +131,14 @@ def remove_packages(module, packages):
         rc, stdout, stderr = module.run_command(cmd, check_rc=False)
 
         if rc != 0:
-            module.fail_json(msg="failed to remove %s" % (package))
+            return ModuleStatus(failed=True,changed=False,msg="failed to remove %s" % (package))
 
         remove_c += 1
 
     if remove_c > 0:
+        return ModuleStatus(changed=True, failed=False, msg="removed %s package(s)" % remove_c)
 
-        module.exit_json(changed=True, msg="removed %s package(s)" % remove_c)
-
-    module.exit_json(changed=False, msg="package(s) already absent")
+    return ModuleStatus(changed=False, failed=False, msg="package(s) already absent")
 
 
 def install_packages(module, packages, package_files):
@@ -152,14 +157,14 @@ def install_packages(module, packages, package_files):
         rc, stdout, stderr = module.run_command(cmd, check_rc=False)
 
         if rc != 0:
-            module.fail_json(msg="failed to install %s" % (package))
+            return ModuleStatus(failed=True,changed=False,msg="failed to install %s" % (package))
 
         install_c += 1
 
     if install_c > 0:
-        module.exit_json(changed=True, msg="installed %s package(s)" % (install_c))
+        return ModuleStatus(changed=True, failed=False, msg="installed %s package(s)" % (install_c))
 
-    module.exit_json(changed=False, msg="package(s) already installed")
+    return ModuleStatus(changed=False, failed=False, msg="package(s) already installed")
 
 
 def check_packages(module, packages, state):
@@ -172,11 +177,17 @@ def check_packages(module, packages, state):
     if would_be_changed:
         if state == "absent":
             state = "removed"
-        module.exit_json(changed=True, msg="%s package(s) would be %s" % (
+
+        return ModuleStatus(changed=True, failed=False, msg="%s package(s) would be %s" % (
             len(would_be_changed), state))
     else:
-        module.exit_json(change=False, msg="package(s) already %s" % state)
+        return ModuleStatus(changed=False, failed=False, msg="package(s) already %s" % state)
 
+def status_join(status1,status2):
+    return ModuleStatus(
+        changed=(status1.changed or status2.changed),
+        failed=(status1.failed or status2.failed),
+        msg=', '.join(filter(None, [status1.msg,status2.msg])))
 
 def main():
     module = AnsibleModule(
@@ -199,10 +210,14 @@ def main():
     elif p['state'] in ['absent', 'removed']:
         p['state'] = 'absent'
 
-    if p["update_cache"] and not module.check_mode:
-        update_package_db(module)
-        if not p['name']:
-            module.exit_json(changed=True, msg='updated the package master lists')
+    return_status = ModuleStatus(changed=False,failed=False,msg=None)
+
+    if p["update_cache"]:
+        return_status = status_join(return_status, 
+                                    update_package_db(module, module.check_mode))
+
+    if return_status.failed:
+        module.exit_json(*return_status)
 
     if p['name']:
         pkgs = p['name'].split(',')
@@ -217,13 +232,26 @@ def main():
             else:
                 pkg_files.append(None)
 
+        pkg_ret_status = None
         if module.check_mode:
-            check_packages(module, pkgs, p['state'])
-
-        if p['state'] == 'present':
-            install_packages(module, pkgs, pkg_files)
+            pkg_ret_status = check_packages(module, pkgs, p['state'])
+        elif p['state'] == 'present':
+            pkg_ret_status = install_packages(module, pkgs, pkg_files)
         elif p['state'] == 'absent':
-            remove_packages(module, pkgs)
+            pkg_ret_status = remove_packages(module, pkgs)
+        else:
+            pkg_ret_status = ModuleStatus(
+                failed=True, 
+                changed=False, 
+                msg="One of 'name' or 'update_cache' must be specified")
+
+        return_status = status_join(return_status, pkg_ret_status)
+
+    if return_status.failed:
+      module.fail_json(msg=return_status.msg)
+    else:
+      module.exit_json(msg=return_status.msg, changed=return_status.changed)
+
 
 # import module snippets
 from ansible.module_utils.basic import *
