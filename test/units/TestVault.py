@@ -134,3 +134,10 @@ class TestVaultLib(TestCase):
             error_hit = True
         assert not error_hit, "An error was thrown when trying to encrypt data without the cipher set"    
         assert v.cipher_name == "AES256", "cipher name is not set to AES256: %s" % v.cipher_name               
+
+    def test_header_operations_are_idempotent(self):
+        pre_data = "klsdjfkaksjdh2342k4jJSLDF234klj2l3asldkf324238klsdfjaASDFKw4RJKELKRJALKJASKDFJALSDFLASJDFLAJSDFLJk24jk234k243kl4jk2j34"
+        v = VaultLib('ansible')
+        actual = v._split_header(v._add_header(pre_data))
+        print v._add_header(pre_data)
+        assert pre_data == actual, "The initial data and post data are not equivalent\ninit:\n[%s]\npost:\n[%s]" % (pre_data,actual)

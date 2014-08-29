@@ -142,29 +142,24 @@ class VaultLib(object):
     def _add_header(self, data):     
         # combine header and encrypted data in 80 char columns
 
-        #tmpdata = hexlify(data)
-        tmpdata = [data[i:i + 80] for i in range(0, len(data), 80)]
-
         if not self.cipher_name:
             raise errors.AnsibleError("the cipher must be set before adding a header")
 
         dirty_data = HEADER + ";" + str(self.version) + ";" + self.cipher_name + "\n"
 
-        for l in tmpdata:
-            dirty_data += l + '\n'
-
-        return dirty_data
+        return dirty_data + data
 
 
     def _split_header(self, data):        
         # used by decrypt
 
-        tmpdata = data.split('\n')
-        tmpheader = tmpdata[0].strip().split(';')
+        header_data_split_index = data.find("\n")
+
+        clean_data = data[header_data_split_index+1:]
+        tmpheader = data[:header_data_split_index].strip().split(';')
 
         self.version = str(tmpheader[1].strip())
         self.cipher_name = str(tmpheader[2].strip())
-        clean_data = '\n'.join(tmpdata[1:])
 
         """
         # strip out newline, join, unhex        
