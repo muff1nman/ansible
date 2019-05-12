@@ -65,7 +65,7 @@ options:
         choices: ['enabled', 'disabled']
     spm_priority:
         description:
-            - "SPM priority of the host. Integer value from 1 to 10, where higher number means higher priority."
+            - "SPM priority of the host. Integer value from 1 to 10 or -1, where higher number means higher priority and -1 is 'Never'."
     override_iptables:
         description:
             - "If True host iptables will be overridden by host deploy script."
